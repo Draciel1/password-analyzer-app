@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Strength & Exposure Analyzer</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for professional look and feel */
+        body {
+            font-family: 'Inter', sans-serif;
+            /* Dark background for the body */
+            background-color: #111827; 
+        }
+        .container-card {
+            /* Adjusted shadow for dark mode */
+            box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.5), 0 5px 15px -5px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+        /* Style for the strength bar filling */
+        .strength-bar-fill {
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+        /* Style for the exposed badge */
+        .exposed-badge {
+            animation: pulse-danger 1s infinite alternate;
+        }
+        @keyframes pulse-danger {
+            /* Use a dark red pulse effect */
+            from { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            to { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex items-start justify-center bg-gray-900 text-gray-100">
+
+    <div class="container-card w-full max-w-xl bg-gray-800 rounded-xl p-6 md:p-8 mt-10">
+        <h1 class="text-3xl font-extrabold text-gray-100 mb-2">Password Security Audit</h1>
+        <p class="text-sm text-gray-400 mb-6">Checks for both Password Strength and Breach Exposure.</p>
+
+        <!-- Password Input Field -->
+        <div class="mb-6">
+            <label for="passwordInput" class="block text-sm font-medium text-gray-300 mb-2">Enter Password to Analyze</label>
+            <input 
+                type="password" 
+                id="passwordInput" 
+                placeholder="Type your password here..." 
+                class="w-full px-4 py-3 border border-gray-600 rounded-lg text-lg focus:outline-none focus:ring-4 bg-gray-700 text-gray-100 focus:ring-blue-500/50 transition duration-150"
+                oninput="updateUI()"
+                autocomplete="off"
+            >
+            <div id="passwordToggle" class="text-xs text-cyan-400 hover:text-cyan-300 cursor-pointer mt-1" onclick="togglePasswordVisibility()">Show Password</div>
+        </div>
+
+        <!-- STRENGTH INDICATOR -->
+        <div class="mb-6">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-sm font-semibold text-gray-300">Randomness Score (Bits)</span>
+                <span id="entropyScore" class="text-lg font-bold text-gray-100">0.00 bits</span>
+            </div>
+            <div class="w-full bg-gray-700 rounded-full h-2.5">
+                <div id="strengthBar" class="strength-bar-fill h-2.5 rounded-full" style="width: 0%; background-color: #3b82f6;"></div>
+            </div>
+            
+            <!-- NEW: Entropy Verdict/Feedback Section -->
+            <div id="entropyVerdictContainer" class="mt-4 p-3 rounded-lg bg-gray-700/50">
+                <p id="entropyRating" class="text-lg font-semibold text-gray-300 flex items-center">
+                    <span class="mr-2 text-xl">🔒</span> Start typing to analyze password strength.
+                </p>
+                <!-- Removed: entropyBruteForce element -->
+                <p id="entropyRecommendation" class="text-sm text-gray-400 mt-2">
+                    Tip: Use a mix of upper/lower case letters, numbers, and symbols, and aim for 12+ characters.
+                </p>
+            </div>
+        </div>
+
+        <!-- EXPOSURE CHECK RESULT -->
+        <div class="p-4 rounded-xl" id="exposureContainer">
+            <h2 class="text-xl font-semibold mb-3 text-gray-100">Breach Exposure Check</h2>
+            <div id="exposureResult" class="flex items-center space-x-3">
+                <div id="exposureIcon" class="w-6 h-6 flex items-center justify-center text-gray-400">
+                    <!-- Icon placeholder -->
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.38 3.375 2.074 3.375h14.5c1.694 0 2.938-1.875 2.074-3.375l-7.5-13.125c-.94-1.65-3.06-1.65-4 0l-7.5 13.125Z" />
+                    </svg>
+                </div>
+                <div id="exposureText" class="text-gray-300">
+                    Checks against billions of passwords leaked in known public data breaches.
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- JS UTILITY FUNCTIONS ---
+
+        /**
+         * Asynchronously calculates the SHA-1 hash of a string using the browser's crypto API.
+         * @param {string} str - The input string (password).
+         * @returns {Promise<string>} The SHA-1 hash in uppercase hexadecimal format.
+         */
+        async function sha1(str) {
+            const buffer = new TextEncoder("utf-8").encode(str);
+            const hash = await crypto.subtle.digest("SHA-1", buffer);
+            // Convert ArrayBuffer to hex string
+            return Array.from(new Uint8Array(hash))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('')
+                .toUpperCase();
+        }
+        
+        function togglePasswordVisibility() {
+            const input = document.getElementById('passwordInput');
+            const toggle = document.getElementById('passwordToggle');
+            if (input.type === 'password') {
+                input.type = 'text';
+                toggle.textContent = 'Hide Password';
+            } else {
+                input.type = 'password';
+                toggle.textContent = 'Show Password';
+            }
+        }
+
+        // --- 1. ENTROPY CALCULATION FUNCTIONS ---
+
+        function getCharacterSetSize(password) {
+            const LOWERCASE_SIZE = 26;
+            const UPPERCASE_SIZE = 26;
+            const DIGIT_SIZE = 10;
+            const SYMBOL_SIZE = 32; 
+
+            let setSize = 0;
+            
+            if (/[a-z]/.test(password)) { setSize += LOWERCASE_SIZE; }
+            if (/[A-Z]/.test(password)) { setSize += UPPERCASE_SIZE; }
+            if (/[0-9]/.test(password)) { setSize += DIGIT_SIZE; }
+            
+            if (/[^a-zA-Z0-9\s]/.test(password)) {
+                setSize += SYMBOL_SIZE;
+            }
+            
+            return setSize;
+        }
+
+        function calculateEntropy(password) {
+            const L = password.length;
+            const S = getCharacterSetSize(password);
+            
+            if (S === 0 || L === 0) {
+                return 0.0;
+            }
+            
+            return L * Math.log2(S);
+        }
+
+        function getEntropyVerdict(entropy) {
+            if (entropy < 40) {
+                return { 
+                    rating: "Very Weak 🔴", 
+                    color: "bg-red-500", 
+                    progress: 20, 
+                    message: "Easy to guess. Needs more length and character variety.",
+                    image: "🚨"
+                };
+            } else if (entropy < 60) {
+                return { 
+                    rating: "Weak 🟠", 
+                    color: "bg-orange-500", 
+                    progress: 40, 
+                    message: "Can be cracked quickly by modern hardware. Increase length and variety.",
+                    image: "⚠️"
+                };
+            } else if (entropy < 80) {
+                return { 
+                    rating: "Fair 🟡", 
+                    color: "bg-yellow-500", 
+                    progress: 65, 
+                    message: "Safe against most online attempts. Consider increasing length for stronger protection.",
+                    image: "🛡️"
+                };
+            } else if (entropy < 100) {
+                return { 
+                    rating: "Strong 🟢", 
+                    color: "bg-green-500", 
+                    progress: 85, 
+                    message: "Excellent. Suitable for sensitive accounts. Very resistant to offline cracking.",
+                    image: "✅"
+                };
+            } else {
+                return { 
+                    rating: "Excellent 💎", 
+                    color: "bg-green-400", 
+                    progress: 100, 
+                    message: "Best-in-class security. Nearly impossible to brute-force.",
+                    image: "🔒"
+                };
+            }
+        }
+
+        // --- 2. EXPOSURE CHECK FUNCTION (HIBP API) ---
+
+        const API_URL = "https://api.pwnedpasswords.com/range/";
+
+        async function checkPwned(password) {
+            if (!password) return 0;
+
+            try {
+                const sha1Hash = await sha1(password);
+                const prefix = sha1Hash.substring(0, 5);
+                const suffix = sha1Hash.substring(5);
+                
+                let attempts = 0;
+                let response;
+
+                while (attempts < 3) {
+                    try {
+                        response = await fetch(API_URL + prefix);
+                        if (response.ok) {
+                            break;
+                        }
+                    } catch (e) {
+                        console.error("Fetch error during HIBP check:", e);
+                    }
+                    attempts++;
+                    if (attempts < 3) {
+                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
+                    }
+                }
+                
+                if (!response || !response.ok) {
+                    console.error("Failed to fetch HIBP data after retries.");
+                    return -1;
+                }
+                
+                const text = await response.text();
+                
+                const lines = text.split('\r\n'); // Use \r\n for Windows/Unix compatibility
+                for (const line of lines) {
+                    if (line.includes(':')) {
+                        const [hashSuffix, count] = line.split(':');
+                        if (hashSuffix === suffix) {
+                            return parseInt(count);
+                        }
+                    }
+                }
+                
+                return 0; // Not found
+                
+            } catch (e) {
+                console.error("Error during password hash or API call:", e);
+                return -1;
+            }
+        }
+
+        // --- 3. UI UPDATE LOGIC ---
+
+        let lastPassword = null;
+        let isChecking = false;
+
+        async function updateUI() {
+            const passwordInput = document.getElementById('passwordInput');
+            const password = passwordInput.value;
+            
+            if (password === lastPassword || isChecking) return;
+            lastPassword = password;
+
+            const entropyScoreEl = document.getElementById('entropyScore');
+            const strengthBarEl = document.getElementById('strengthBar');
+            const entropyRatingEl = document.getElementById('entropyRating');
+            const entropyRecommendationEl = document.getElementById('entropyRecommendation');
+            const exposureResultEl = document.getElementById('exposureText');
+            const exposureIconEl = document.getElementById('exposureIcon');
+            const exposureContainerEl = document.getElementById('exposureContainer');
+            const entropyVerdictContainerEl = document.getElementById('entropyVerdictContainer');
+
+
+            // Reset UI for empty password
+            if (!password) {
+                entropyScoreEl.textContent = "0.00 bits";
+                strengthBarEl.style.width = "0%";
+                strengthBarEl.className = "strength-bar-fill h-2.5 rounded-full bg-gray-600";
+                
+                entropyVerdictContainerEl.className = "mt-4 p-3 rounded-lg bg-gray-700/50";
+                entropyRatingEl.innerHTML = '<span class="mr-2 text-xl">🔒</span> Start typing to analyze password strength.';
+                entropyRecommendationEl.textContent = 'Tip: Use a mix of upper/lower case letters, numbers, and symbols, and aim for 12+ characters.';
+                
+                exposureContainerEl.className = "p-4 rounded-xl bg-gray-700";
+                exposureIconEl.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-gray-400">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.38 3.375 2.074 3.375h14.5c1.694 0 2.938-1.875 2.074-3.375l-7.5-13.125c-.94-1.65-3.06-1.65-4 0l-7.5 13.125Z" />
+                    </svg>
+                `;
+                exposureResultEl.innerHTML = '<span class="text-gray-300">Checks against billions of passwords leaked in known public data breaches.</span>';
+                return;
+            }
+
+            isChecking = true;
+            
+            // --- 1. ENTROPY UPDATE (Initial strength calculation) ---
+            const entropy = calculateEntropy(password);
+            const { rating, color, progress, message, image } = getEntropyVerdict(entropy);
+
+            // Set initial strength UI based purely on entropy
+            entropyScoreEl.textContent = `${entropy.toFixed(2)} bits`;
+            strengthBarEl.style.width = `${progress}%`;
+            strengthBarEl.className = `strength-bar-fill h-2.5 rounded-full ${color}`;
+            
+            entropyVerdictContainerEl.className = `mt-4 p-3 rounded-lg border-2 border-opacity-50 ${color.replace('bg-', 'border-')}`;
+            entropyRatingEl.innerHTML = `<span class="mr-2 text-xl">${rating}</span><span class="font-bold">${image}</span>`;
+            entropyRecommendationEl.textContent = `Recommendation: ${message}`;
+
+
+            // --- 2. EXPOSURE UPDATE (Start Loading State) ---
+            exposureContainerEl.className = "p-4 rounded-xl bg-cyan-900/50 border border-cyan-700";
+            exposureIconEl.innerHTML = '<svg class="animate-spin h-5 w-5 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            exposureResultEl.innerHTML = '<span class="text-cyan-400">Running breach check (k-Anonymity protocol)...</span>';
+
+            // --- 3. RUN ASYNC CHECK ---
+            const pwnedCount = await checkPwned(password);
+            isChecking = false;
+
+            if (pwnedCount === -1) {
+                // API Error
+                exposureContainerEl.className = "p-4 rounded-xl bg-gray-700 border border-gray-600";
+                exposureIconEl.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-gray-400">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.38 3.375 2.074 3.375h14.5c1.694 0 2.938-1.875 2.074-3.375l-7.5-13.125c-.94-1.65-3.06-1.65-4 0l-7.5 13.125Z" />
+                    </svg>
+                `;
+                exposureResultEl.innerHTML = '<span class="text-gray-400">⚠️ Failed to complete exposure check. Could not reach HIBP API.</span>';
+            } else if (pwnedCount > 0) {
+                // EXPOSED!
+                exposureContainerEl.className = "p-4 rounded-xl bg-red-900/50 border border-red-700 exposed-badge";
+                exposureIconEl.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-red-400">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a8.25 8.25 0 1 1-16.5 0 8.25 8.25 0 0 1 16.5 0ZM12 18.75h.008v.008H12z" />
+                    </svg>
+                `;
+                exposureResultEl.innerHTML = `<span class="text-red-400 font-bold">🚨 COMPROMISED!</span> This password has been seen <span class="font-extrabold">${pwnedCount.toLocaleString()}</span> times in public data breaches. **Change it immediately.**`;
+                
+                
+                // --- CORE DOWNGRADE LOGIC ---
+                const initialRating = rating; 
+                
+                if (initialRating.startsWith("Fair") || initialRating.startsWith("Strong")) {
+                    // Downgrade required: change visuals to Weak (50 bits falls in Weak range)
+                    const downgradeVerdict = getEntropyVerdict(50); 
+                    
+                    // 1. Update Strength Bar/Color
+                    strengthBarEl.style.width = `${downgradeVerdict.progress}%`; 
+                    strengthBarEl.className = `strength-bar-fill h-2.5 rounded-full ${downgradeVerdict.color}`; 
+                    
+                    // 2. Update Strength Rating Text
+                    entropyRatingEl.innerHTML = `<span class="mr-2 text-xl">Weakened ⚠️</span><span class="font-bold">${downgradeVerdict.image}</span>`;
+                    
+                    // 3. Update Rating Container Border to Orange
+                    entropyVerdictContainerEl.className = `mt-4 p-3 rounded-lg border-2 border-opacity-50 ${downgradeVerdict.color.replace('bg-', 'border-')}`;
+                } 
+                
+                // Override recommendation for ALL exposed passwords
+                entropyRecommendationEl.innerHTML = '<span class="font-extrabold text-red-400">ACTION REQUIRED: PASSWORD IS PUBLIC! Change it now.</span>';
+
+            } else {
+                // Not Pwned (Green)
+                exposureContainerEl.className = "p-4 rounded-xl bg-green-900/50 border border-green-700";
+                exposureIconEl.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-green-400">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                `;
+                exposureResultEl.innerHTML = '<span class="text-green-400 font-bold">✅ Unexposed!</span> (Not found in known public breaches.)';
+            }
+        }
+        
+        // Initial setup on load
+        document.addEventListener('DOMContentLoaded', () => {
+            updateUI();
+        });
+        
+    </script>
+</body>
+</html>
