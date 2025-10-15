@@ -27,7 +27,7 @@
             animation: pulse-danger 1s infinite alternate;
         }
         @keyframes pulse-danger {
-            /* Use a dark red pulse effect */
+            /* Use a dark red pulse pulse effect */
             from { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
             to { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
         }
@@ -48,9 +48,11 @@
                 placeholder="Type your password here..." 
                 class="w-full px-4 py-3 border border-gray-600 rounded-lg text-lg focus:outline-none focus:ring-4 bg-gray-700 text-gray-100 focus:ring-blue-500/50 transition duration-150"
                 oninput="updateUI()"
+                onkeydown="if(event.key === ' ') { event.preventDefault(); showSpaceWarning(); }" 
                 autocomplete="off"
             >
             <div id="passwordToggle" class="text-xs text-cyan-400 hover:text-cyan-300 cursor-pointer mt-1" onclick="togglePasswordVisibility()">Show Password</div>
+            <div id="spaceWarning" class="text-sm text-red-400 mt-1 h-4 opacity-0 transition-opacity duration-300"></div>
         </div>
 
         <!-- STRENGTH INDICATOR -->
@@ -63,12 +65,11 @@
                 <div id="strengthBar" class="strength-bar-fill h-2.5 rounded-full" style="width: 0%; background-color: #3b82f6;"></div>
             </div>
             
-            <!-- NEW: Entropy Verdict/Feedback Section -->
+            <!-- Entropy Verdict/Feedback Section -->
             <div id="entropyVerdictContainer" class="mt-4 p-3 rounded-lg bg-gray-700/50">
                 <p id="entropyRating" class="text-lg font-semibold text-gray-300 flex items-center">
                     <span class="mr-2 text-xl">🔒</span> Start typing to analyze password strength.
                 </p>
-                <!-- Removed: entropyBruteForce element -->
                 <p id="entropyRecommendation" class="text-sm text-gray-400 mt-2">
                     Tip: Use a mix of upper/lower case letters, numbers, and symbols, and aim for 12+ characters.
                 </p>
@@ -122,6 +123,22 @@
                 toggle.textContent = 'Show Password';
             }
         }
+        
+        // Timer for hiding the warning
+        let warningTimer;
+        function showSpaceWarning() {
+            const warningEl = document.getElementById('spaceWarning');
+            warningEl.textContent = "Spaces are not allowed in the password.";
+            warningEl.classList.remove('opacity-0');
+            warningEl.classList.add('opacity-100');
+
+            clearTimeout(warningTimer);
+            warningTimer = setTimeout(() => {
+                warningEl.classList.remove('opacity-100');
+                warningEl.classList.add('opacity-0');
+            }, 1500);
+        }
+
 
         // --- 1. ENTROPY CALCULATION FUNCTIONS ---
 
@@ -137,7 +154,8 @@
             if (/[A-Z]/.test(password)) { setSize += UPPERCASE_SIZE; }
             if (/[0-9]/.test(password)) { setSize += DIGIT_SIZE; }
             
-            if (/[^a-zA-Z0-9\s]/.test(password)) {
+            // Note: Spaces are handled by the input handler, but we keep the regex robust.
+            if (/[^a-zA-Z0-9\s]/.test(password)) { 
                 setSize += SYMBOL_SIZE;
             }
             
@@ -193,7 +211,7 @@
                     rating: "Excellent 💎", 
                     color: "bg-green-400", 
                     progress: 100, 
-                    message: "Best-in-class security. Nearly impossible to brute-force.",
+                    message: "Best-in-class security.", // Updated: Removed "Nearly impossible to brute-force."
                     image: "🔒"
                 };
             }
@@ -216,6 +234,7 @@
 
                 while (attempts < 3) {
                     try {
+                        // Use the non-streaming HIBP API
                         response = await fetch(API_URL + prefix);
                         if (response.ok) {
                             break;
@@ -224,6 +243,7 @@
                         console.error("Fetch error during HIBP check:", e);
                     }
                     attempts++;
+                    // Exponential backoff
                     if (attempts < 3) {
                         await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
                     }
@@ -236,7 +256,7 @@
                 
                 const text = await response.text();
                 
-                const lines = text.split('\r\n'); // Use \r\n for Windows/Unix compatibility
+                const lines = text.split('\r\n');
                 for (const line of lines) {
                     if (line.includes(':')) {
                         const [hashSuffix, count] = line.split(':');
@@ -261,8 +281,21 @@
 
         async function updateUI() {
             const passwordInput = document.getElementById('passwordInput');
-            const password = passwordInput.value;
+            let password = passwordInput.value;
             
+            // Check for pasted spaces and clean them up
+            if (password.includes(' ')) {
+                const originalLength = password.length;
+                password = password.replace(/\s/g, '');
+                
+                // Only update the input field if a change was made
+                if (password.length < originalLength) {
+                    passwordInput.value = password; 
+                    showSpaceWarning();
+                }
+            }
+
+
             if (password === lastPassword || isChecking) return;
             lastPassword = password;
 
@@ -345,7 +378,7 @@
                 const initialRating = rating; 
                 
                 if (initialRating.startsWith("Fair") || initialRating.startsWith("Strong")) {
-                    // Downgrade required: change visuals to Weak (50 bits falls in Weak range)
+                    // Downgrade required: change visuals to Weakened (orange color/progress)
                     const downgradeVerdict = getEntropyVerdict(50); 
                     
                     // 1. Update Strength Bar/Color
